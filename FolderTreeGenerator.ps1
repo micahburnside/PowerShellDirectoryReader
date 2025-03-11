@@ -159,3 +159,5 @@ if ([string]::IsNullOrEmpty($OutputPath)) {
     $jsonOutput | Out-File -FilePath $OutputPath -Encoding UTF8
     Write-Output "JSON output written to: $OutputPath"
 }
+
+# TODO: ADD README
