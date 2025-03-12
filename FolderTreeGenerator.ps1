@@ -128,6 +128,7 @@ try {
 } catch {
     Write-Error "Target directory not found: $TargetDirectory"
     exit 1
+}
 
 # Read ignore patterns from the target directory.
 $ignorePatterns = Get-IgnorePatterns -BasePath $basePath
