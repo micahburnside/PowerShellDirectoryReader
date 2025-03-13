@@ -1,5 +1,0 @@
-﻿└── FolderTreeGenerator
-    ├── .gitignore
-    ├── FolderTreeGenerator.ps1
-    ├── LICENSE
-    └── README.md
