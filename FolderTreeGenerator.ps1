@@ -5,7 +5,7 @@
 .DESCRIPTION
     This script reads ignore patterns from ignore files (default: .gitignore, .dockerignore, .npmignore) in the target directory.
     It builds a folder tree, skipping files/directories matching the ignore patterns. If no .gitignore is found, it ignores items 
-    starting with a dot (e.g., .venv, .idea). The result is output as JSON and an ASCII tree.
+    starting with a dot (e.g., .venv, .idea). Always ignores short, lowercase build artifact directories (e.g., bin, obj). The result is output as JSON and an ASCII tree.
 
 .PARAMETER TargetDirectory
     The directory to scan. In -UseCLI mode, you can specify it or be prompted; in -UseGUI mode, it’s always selected via dialog.
@@ -120,6 +120,13 @@ function Get-FolderTree {
         return $null
     }
     
+    # Ignore build artifact-like directories: short, all-lowercase names.
+    if ($item.PSIsContainer -and $item.Name.Length -le 6 -and $item.Name -cmatch "^[a-z]+$") {
+        Write-Verbose "Ignoring $($item.FullName) as a potential build artifact directory"
+        return $null
+    }
+    
+    # Check ignore patterns from files.
     foreach ($pattern in $IgnorePatterns) {
         if ($item.Name -like $pattern -or $item.FullName -like "*$pattern*") {
             Write-Verbose "Ignoring $($item.FullName) due to pattern: $pattern"
@@ -127,6 +134,7 @@ function Get-FolderTree {
         }
     }
     
+    # Ignore dot-files if no .gitignore is present.
     if (-not $HasGitignore -and $item.Name -match "^\..*$") {
         Write-Verbose "Ignoring $($item.FullName) as a dot-item with no .gitignore"
         return $null
@@ -258,3 +266,4 @@ try {
 } catch {
     Write-Error "Failed to write ASCII tree to $asciiOutputPath : $_"
 }
+
