@@ -1,0 +1,22 @@
+﻿{
+    "Name":  "NewsPrompter",
+    "Type":  "Folder",
+    "Children":  [
+                     {
+                         "Name":  "modules.json",
+                         "Type":  "File"
+                     },
+                     {
+                         "Name":  "newsPrompter.py",
+                         "Type":  "File"
+                     },
+                     {
+                         "Name":  "newsPrompterDemo.py",
+                         "Type":  "File"
+                     },
+                     {
+                         "Name":  "schema.json",
+                         "Type":  "File"
+                     }
+                 ]
+}
