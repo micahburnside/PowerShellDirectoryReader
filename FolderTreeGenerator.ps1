@@ -1,55 +1,76 @@
-<#
+﻿<#
 .SYNOPSIS
-    Generates a JSON representation of a directory tree while respecting ignore patterns.
+    Generates a JSON representation and an ASCII tree of a directory while respecting ignore patterns.
 
 .DESCRIPTION
-    This script reads ignore patterns from one or more ignore files (default: .gitignore, .dockerignore, .npmignore)
-    found in the target directory. It then recursively builds a folder tree of that directory, skipping any files or
-    directories that match the ignore patterns. The result is output as JSON either to a file (if an output path is
-    provided or selected via a GUI dialog) or printed to the console.
+    This script reads ignore patterns from ignore files (default: .gitignore, .dockerignore, .npmignore) in the target directory.
+    It builds a folder tree, skipping files/directories matching the ignore patterns. If no .gitignore is found, it ignores items 
+    starting with a dot (e.g., .venv, .idea). The result is output as JSON and an ASCII tree.
 
 .PARAMETER TargetDirectory
-    The directory to scan. Defaults to the current directory (".") if not provided. When -UseGUI is specified and no
-    target directory is explicitly supplied (or if you wish to choose a different one), a folder browser dialog will prompt you to select one.
+    The directory to scan. In -UseCLI mode, you can specify it or be prompted; in -UseGUI mode, it’s always selected via dialog.
 
 .PARAMETER OutputPath
-    (Optional) The file path to which the JSON output will be saved. If not provided and -UseGUI is specified,
-    a file-save dialog will open. If neither is provided, the JSON is printed to the console.
+    (Optional) The file path for the JSON output. In -UseCLI mode, ignored; in -UseGUI mode, prompted via dialog if not provided.
+
+.PARAMETER UseCLI
+    (Switch) Runs in CLI mode, prompting the user to choose between GUI folder selection or manual entry; JSON output defaults to "<foldername>-tree.json".
 
 .PARAMETER UseGUI
-    (Switch) If specified and no TargetDirectory or OutputPath is explicitly supplied, GUI dialogs will prompt you to select them.
+    (Switch) Runs in GUI mode, using dialogs for directory and output selection.
 
 .PARAMETER IncludeExtensions
-    (Optional) An array of file extensions to include. If left empty (the default), all files (not excluded by ignore
-    patterns) are included. This makes the script language agnostic by default.
-
-.EXAMPLE
-    .\FolderTreeGenerator.ps1 -TargetDirectory "C:\MyProject" -OutputPath "C:\MyProject\folderTree.json"
-    Scans "C:\MyProject", applies ignore patterns from ignore files, and writes the resulting JSON to folderTree.json.
+    (Optional) An array of file extensions to include. If empty (default), all files not excluded by ignore patterns are included.
 
 .EXAMPLE
     .\FolderTreeGenerator.ps1 -UseGUI
-    Prompts you to select a target directory and an output file using GUI dialogs, then generates the folder tree JSON.
+    Runs in GUI mode, prompting with dialogs for directory and JSON output file.
+
+.EXAMPLE
+    .\FolderTreeGenerator.ps1 -UseCLI
+    Runs in CLI mode, asking if you want to select a folder with GUI or enter a path manually; JSON saved as "<foldername>-tree.json".
 #>
 
 param(
-    [string]$TargetDirectory = ".",
+    [string]$TargetDirectory,
     [string]$OutputPath,
+    [switch]$UseCLI,
     [switch]$UseGUI,
-    [string[]]$IncludeExtensions = @()  # Empty by default for language-agnostic behavior.
+    [string[]]$IncludeExtensions = @()
 )
 
-# If UseGUI is specified and TargetDirectory is left as default or not explicitly provided,
-# prompt with a folder browser dialog.
-if ($UseGUI -and ([string]::IsNullOrEmpty($TargetDirectory) -or $TargetDirectory -eq ".")) {
-    Add-Type -AssemblyName System.Windows.Forms
-    $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $folderDialog.Description = "Select the target directory to scan for the folder tree."
-    if ($folderDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-         $TargetDirectory = $folderDialog.SelectedPath
+# Ensure exactly one mode is specified.
+if (-not $UseCLI -and -not $UseGUI) {
+    Write-Error "You must specify either -UseCLI or -UseGUI."
+    exit 1
+}
+if ($UseCLI -and $UseGUI) {
+    Write-Error "You cannot specify both -UseCLI and -UseGUI."
+    exit 1
+}
+
+# Set console output encoding to UTF-8 for proper Unicode display (e.g., ├──, └──, │).
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+# Handle directory selection based on mode.
+if ($UseGUI -or ($UseCLI -and [string]::IsNullOrEmpty($TargetDirectory))) {
+    if ($UseGUI -or ($UseCLI -and $(Write-Host "Do you want to select the folder with a GUI? (Y/N): "; $response = Read-Host; $response -eq 'Y'))) {
+        Add-Type -AssemblyName System.Windows.Forms
+        $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folderDialog.Description = "Select the target directory to scan for the folder tree."
+        if ($folderDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $TargetDirectory = $folderDialog.SelectedPath
+        } else {
+            Write-Output "Operation cancelled by user."
+            exit
+        }
     } else {
-         Write-Output "Operation cancelled by user."
-         exit
+        # CLI manual entry.
+        $TargetDirectory = Read-Host "Enter the target directory path"
+        if ([string]::IsNullOrEmpty($TargetDirectory)) {
+            Write-Error "No directory specified."
+            exit 1
+        }
     }
 }
 
@@ -61,16 +82,25 @@ function Get-IgnorePatterns {
     )
     
     $patterns = @()
+    $hasGitignore = $false
     foreach ($file in $IgnoreFiles) {
         $filePath = Join-Path $BasePath $file
         if (Test-Path -LiteralPath $filePath) {
+            if ($file -eq ".gitignore") {
+                $hasGitignore = $true
+            }
             $lines = Get-Content -LiteralPath $filePath | Where-Object {
                 $_.Trim() -ne "" -and $_.Trim() -notmatch "^\s*#" -and $_ -notmatch "^\s*!"
-            } | ForEach-Object { $_.Trim().TrimEnd('/') }  # Remove trailing slash for consistency.
+            } | ForEach-Object { $_.Trim().TrimEnd('/') }
             $patterns += $lines
         }
     }
-    return $patterns
+    Write-Output "Ignore patterns loaded from $BasePath : $patterns"
+    Write-Output "Has .gitignore: $hasGitignore"
+    return [PSCustomObject]@{
+        Patterns = $patterns
+        HasGitignore = $hasGitignore
+    }
 }
 
 # Recursive function to build the folder tree while respecting ignore patterns.
@@ -79,6 +109,7 @@ function Get-FolderTree {
         [Parameter(Mandatory=$true)]
         [string]$Path,
         [string[]]$IgnorePatterns = @(),
+        [bool]$HasGitignore = $false,
         [string[]]$IncludeExtensions = @()
     )
     
@@ -89,11 +120,16 @@ function Get-FolderTree {
         return $null
     }
     
-    # Check if the current item should be ignored.
     foreach ($pattern in $IgnorePatterns) {
         if ($item.Name -like $pattern -or $item.FullName -like "*$pattern*") {
+            Write-Verbose "Ignoring $($item.FullName) due to pattern: $pattern"
             return $null
         }
+    }
+    
+    if (-not $HasGitignore -and $item.Name -match "^\..*$") {
+        Write-Verbose "Ignoring $($item.FullName) as a dot-item with no .gitignore"
+        return $null
     }
     
     $result = [PSCustomObject]@{
@@ -104,13 +140,12 @@ function Get-FolderTree {
     if ($item.PSIsContainer) {
         $result | Add-Member -MemberType NoteProperty -Name Children -Value @()
         foreach ($child in Get-ChildItem -LiteralPath $Path) {
-            $childTree = Get-FolderTree -Path $child.FullName -IgnorePatterns $IgnorePatterns -IncludeExtensions $IncludeExtensions
+            $childTree = Get-FolderTree -Path $child.FullName -IgnorePatterns $IgnorePatterns -HasGitignore $HasGitignore -IncludeExtensions $IncludeExtensions
             if ($childTree -ne $null) {
                 $result.Children += $childTree
             }
         }
     } else {
-        # If an include filter is provided, only include files with matching extensions.
         if ($IncludeExtensions.Count -gt 0) {
             $extension = [System.IO.Path]::GetExtension($item.Name)
             if (-not ($IncludeExtensions -contains $extension)) {
@@ -119,6 +154,33 @@ function Get-FolderTree {
         }
     }
     return $result
+}
+
+# Function to generate an ASCII tree from the folder tree object using Unicode characters.
+function Get-AsciiTree {
+    param(
+        [Parameter(Mandatory=$true)]
+        $Node,
+        [string]$Prefix = "",
+        [bool]$IsLast = $true
+    )
+    
+    $output = @()
+    $currentPrefix = $Prefix
+    $symbol = if ($IsLast) { "└── " } else { "├── " }
+    $output += "$currentPrefix$symbol$($Node.Name)"
+    
+    if ($Node.Type -eq "Folder" -and $Node.Children) {
+        $validChildren = $Node.Children | Where-Object { $_ -ne $null -and $_.PSObject.Properties.Name -contains "Name" }
+        $childrenCount = $validChildren.Count
+        for ($i = 0; $i -lt $childrenCount; $i++) {
+            $child = $validChildren[$i]
+            $isLastChild = ($i -eq $childrenCount - 1)
+            $newPrefix = $Prefix + $(if ($IsLast) { "    " } else { "│   " })
+            $output += Get-AsciiTree -Node $child -Prefix $newPrefix -IsLast $isLastChild
+        }
+    }
+    return $output
 }
 
 # Resolve the target directory.
@@ -131,34 +193,68 @@ try {
 }
 
 # Read ignore patterns from the target directory.
-$ignorePatterns = Get-IgnorePatterns -BasePath $basePath
+$ignoreInfo = Get-IgnorePatterns -BasePath $basePath
+$ignorePatterns = $ignoreInfo.Patterns
+$hasGitignore = $ignoreInfo.HasGitignore
 
 # Build the folder tree using the ignore patterns from the ignore files.
-$folderTree = Get-FolderTree -Path $basePath -IgnorePatterns $ignorePatterns -IncludeExtensions $IncludeExtensions
+$folderTree = Get-FolderTree -Path $basePath -IgnorePatterns $ignorePatterns -HasGitignore $hasGitignore -IncludeExtensions $IncludeExtensions
+
+if ($null -eq $folderTree) {
+    Write-Error "Failed to generate folder tree. The directory might be empty or all items ignored."
+    exit 1
+}
 
 # Convert the folder tree to JSON.
 $jsonOutput = $folderTree | ConvertTo-Json -Depth 10
 
-# If UseGUI is specified and OutputPath is empty, prompt for an output file.
-if ([string]::IsNullOrEmpty($OutputPath) -and $UseGUI) {
-    Add-Type -AssemblyName System.Windows.Forms
-    $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
-    $saveFileDialog.Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
-    $saveFileDialog.Title = "Select output file for folder tree JSON"
-    if ($saveFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-         $OutputPath = $saveFileDialog.FileName
-    } else {
-         Write-Output "Operation cancelled by user."
-         exit
+# Generate the ASCII tree.
+$asciiTree = Get-AsciiTree -Node $folderTree
+if ($null -eq $asciiTree -or $asciiTree.Count -eq 0) {
+    Write-Warning "ASCII tree generation resulted in an empty tree."
+    $asciiTree = @("Empty tree generated for $($folderTree.Name)")
+}
+
+# Define the paths using the directory name.
+$folderName = [System.IO.Path]::GetFileName($basePath)
+$asciiOutputPath = Join-Path -Path $basePath -ChildPath "$folderName.txt"
+$defaultJsonOutputPath = Join-Path -Path $basePath -ChildPath "$folderName-tree.json"
+
+# Handle JSON output based on mode.
+if ($UseGUI) {
+    if ([string]::IsNullOrEmpty($OutputPath)) {
+        Add-Type -AssemblyName System.Windows.Forms
+        $OutputPath = $defaultJsonOutputPath
+        
+        $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
+        $saveFileDialog.InitialDirectory = $basePath
+        $saveFileDialog.FileName = "$folderName-tree.json"
+        $saveFileDialog.Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
+        $saveFileDialog.Title = "Confirm output file for folder tree JSON"
+        if ($saveFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $OutputPath = $saveFileDialog.FileName
+        } else {
+            Write-Output "Operation cancelled by user."
+            exit
+        }
+    }
+} else {
+    # CLI mode: Use default JSON path if not specified.
+    if ([string]::IsNullOrEmpty($OutputPath)) {
+        $OutputPath = $defaultJsonOutputPath
     }
 }
 
-# Output the JSON either to a file or to the console.
-if ([string]::IsNullOrEmpty($OutputPath)) {
-    Write-Output $jsonOutput
-} else {
-    $jsonOutput | Out-File -FilePath $OutputPath -Encoding UTF8
-    Write-Output "JSON output written to: $OutputPath"
-}
+# Output the JSON to a file.
+$jsonOutput | Out-File -FilePath $OutputPath -Encoding UTF8
+Write-Output "JSON output written to: $OutputPath"
 
-# TODO: ADD README
+# Output the ASCII tree to console and file with UTF-8 encoding.
+Write-Output "`nASCII Folder Tree:"
+Write-Output $asciiTree
+try {
+    $asciiTree | Out-File -FilePath $asciiOutputPath -Encoding UTF8
+    Write-Output "ASCII tree written to: $asciiOutputPath"
+} catch {
+    Write-Error "Failed to write ASCII tree to $asciiOutputPath : $_"
+}
