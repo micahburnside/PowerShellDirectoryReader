@@ -45,10 +45,10 @@ Run the script in CLI mode with the command:
 - Build Artifact Exclusion: Automatically skips short, lowercase directories (e.g., bin, obj, debug) as potential build outputs.
 
 ## Example
-To create a README1.md file in PowerShell and then run the script, use the following commands:
+To create a README.md file in PowerShell and then run the script, use the following commands:
 
 ```ps1
-"echo $null > \"README1.md\""
+"echo $null > \"README.md\""
 ".\FolderTreeGenerator.ps1 -UseCLI"
 ```
 - Enter N and specify a path like C:\Users\Owner\Projects\DotNetTemplate.
